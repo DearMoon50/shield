@@ -57,7 +57,7 @@ public class MainActivity extends AppCompatActivity {
         });
 
         findViewById(R.id.btnLockerGuard).setOnClickListener(v -> {
-            Intent intent = new Intent(this, com.dearmoon.shield.lockerguard.EmergencyRecoveryActivity.class);
+            Intent intent = new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS);
             startActivity(intent);
         });
 
@@ -122,6 +122,7 @@ public class MainActivity extends AppCompatActivity {
     private void updateStatusDisplay() {
         boolean isServiceRunning = isServiceRunning(ShieldProtectionService.class);
         boolean isVpnRunning = isServiceRunning(NetworkGuardService.class);
+        boolean isLockerGuardEnabled = isAccessibilityServiceEnabled();
 
         if (isServiceRunning || isVpnRunning) {
             tvProtectionStatus.setText("System Protected");
@@ -141,8 +142,23 @@ public class MainActivity extends AppCompatActivity {
         if (isVpnRunning) {
             permStatus.append(" | Network Monitor Active");
         }
+        
+        permStatus.append(" | Locker Guard: ").append(isLockerGuardEnabled ? "ON" : "OFF");
 
         tvPermissionStatus.setText(permStatus.toString());
+    }
+
+    private boolean isAccessibilityServiceEnabled() {
+        String service = getPackageName() + "/com.dearmoon.shield.lockerguard.LockerShieldService";
+        try {
+            int enabled = Settings.Secure.getInt(getContentResolver(), Settings.Secure.ACCESSIBILITY_ENABLED);
+            if (enabled == 1) {
+                String services = Settings.Secure.getString(getContentResolver(), Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES);
+                return services != null && services.contains(service);
+            }
+        } catch (Exception e) {
+        }
+        return false;
     }
 
     private boolean isServiceRunning(Class<?> serviceClass) {

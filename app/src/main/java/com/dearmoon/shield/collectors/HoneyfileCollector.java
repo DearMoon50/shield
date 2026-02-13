@@ -22,22 +22,36 @@ public class HoneyfileCollector {
     }
 
     public void createHoneyfiles(Context context, String[] directories) {
+        String[] honeyfileNames = {
+            ".shield_trap",
+            ".important_data",
+            ".backup_keys",
+            ".credentials",
+            ".private_info",
+            ".secure_vault"
+        };
+        
         for (String dir : directories) {
             File directory = new File(dir);
             if (!directory.exists()) continue;
 
-            File honeyfile = new File(directory, ".important_document.txt");
-            try (FileWriter writer = new FileWriter(honeyfile)) {
-                writer.write("CONFIDENTIAL DATA - DO NOT ACCESS");
-                honeyfiles.add(honeyfile);
-                
-                HoneyfileObserver observer = new HoneyfileObserver(honeyfile.getAbsolutePath());
-                observer.startWatching();
-                observers.add(observer);
-                
-                Log.d(TAG, "Created honeyfile: " + honeyfile.getAbsolutePath());
-            } catch (Exception e) {
-                Log.e(TAG, "Failed to create honeyfile", e);
+            for (String name : honeyfileNames) {
+                File honeyfile = new File(directory, name);
+                try (FileWriter writer = new FileWriter(honeyfile)) {
+                    writer.write("");
+                    honeyfiles.add(honeyfile);
+                    
+                    honeyfile.setReadable(false, false);
+                    honeyfile.setWritable(false, false);
+                    
+                    HoneyfileObserver observer = new HoneyfileObserver(honeyfile.getAbsolutePath());
+                    observer.startWatching();
+                    observers.add(observer);
+                    
+                    Log.d(TAG, "Created invisible honeyfile: " + honeyfile.getAbsolutePath());
+                } catch (Exception e) {
+                    Log.e(TAG, "Failed to create honeyfile", e);
+                }
             }
         }
     }
@@ -59,12 +73,16 @@ public class HoneyfileCollector {
 
         @Override
         public void onEvent(int event, @Nullable String path) {
-            String accessType = getAccessType(event);
-            HoneyfileEvent honeyEvent = new HoneyfileEvent(
-                filePath, accessType, android.os.Process.myUid(), "unknown"
-            );
-            storage.store(honeyEvent);
-            Log.w(TAG, "HONEYFILE ACCESSED: " + filePath + " - " + accessType);
+            if (event == OPEN || event == MODIFY || event == DELETE || event == CLOSE_WRITE) {
+                String accessType = getAccessType(event);
+                int callingUid = android.os.Binder.getCallingUid();
+                
+                HoneyfileEvent honeyEvent = new HoneyfileEvent(
+                    filePath, accessType, callingUid, "uid:" + callingUid
+                );
+                storage.store(honeyEvent);
+                Log.w(TAG, "⚠️ HONEYFILE TRAP TRIGGERED: " + filePath + " (" + accessType + ") by UID " + callingUid);
+            }
         }
 
         private String getAccessType(int event) {

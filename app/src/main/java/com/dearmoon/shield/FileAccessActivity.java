@@ -67,36 +67,44 @@ public class FileAccessActivity extends AppCompatActivity {
         filteredEvents.clear();
 
         File telemetryFile = new File(getFilesDir(), "modeb_telemetry.json");
-        Log.d(TAG, "Loading from: " + telemetryFile.getAbsolutePath());
-        Log.d(TAG, "File exists: " + telemetryFile.exists());
+        Log.i(TAG, "Loading from: " + telemetryFile.getAbsolutePath());
+        Log.i(TAG, "File exists: " + telemetryFile.exists());
         
         if (!telemetryFile.exists()) {
             Log.w(TAG, "No telemetry file found");
             updateEventCount();
+            logAdapter.notifyDataSetChanged();
             return;
         }
         
-        Log.d(TAG, "File size: " + telemetryFile.length() + " bytes");
+        Log.i(TAG, "File size: " + telemetryFile.length() + " bytes");
 
         try (BufferedReader reader = new BufferedReader(
                 new InputStreamReader(new FileInputStream(telemetryFile)))) {
 
             String line;
+            int lineCount = 0;
             while ((line = reader.readLine()) != null) {
+                lineCount++;
                 if (line.trim().isEmpty()) continue;
 
                 try {
                     JSONObject json = new JSONObject(line);
-                    if ("FILE_SYSTEM".equals(json.getString("eventType"))) {
+                    String eventType = json.optString("eventType", "");
+                    Log.d(TAG, "Line " + lineCount + ": eventType=" + eventType);
+                    
+                    if ("FILE_SYSTEM".equals(eventType)) {
                         LogViewerActivity.LogEntry entry = parseFileEvent(json);
                         if (entry != null) {
                             allEvents.add(entry);
+                            Log.d(TAG, "Added event: " + entry.title);
                         }
                     }
                 } catch (Exception e) {
-                    Log.e(TAG, "Error parsing line: " + line, e);
+                    Log.e(TAG, "Error parsing line " + lineCount + ": " + line, e);
                 }
             }
+            Log.i(TAG, "Total events loaded: " + allEvents.size());
         } catch (Exception e) {
             Log.e(TAG, "Error reading file", e);
         }
@@ -125,7 +133,7 @@ public class FileAccessActivity extends AppCompatActivity {
                 json.optLong("fileSizeAfter", 0));
 
         switch (operation) {
-            case "DELETE":
+            case "DELETED":
                 entry.severity = "HIGH";
                 break;
             case "MODIFY":

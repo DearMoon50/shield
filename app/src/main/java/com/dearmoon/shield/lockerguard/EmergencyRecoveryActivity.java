@@ -26,7 +26,7 @@ public class EmergencyRecoveryActivity extends AppCompatActivity {
         Button btnOpenSettings = findViewById(R.id.btnOpenSettings);
         Button btnDismiss = findViewById(R.id.btnDismiss);
         
-        tvWarning.setText("⚠️ RANSOMWARE DETECTED");
+        tvWarning.setText("Locker Shield");
         tvPackageName.setText("Suspicious App: " + suspiciousPackage);
         tvRiskScore.setText("Risk Score: " + riskScore + "/100");
         

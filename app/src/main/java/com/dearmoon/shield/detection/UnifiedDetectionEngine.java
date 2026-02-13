@@ -48,9 +48,8 @@ public class UnifiedDetectionEngine {
 
             Log.d(TAG, "Analyzing file event: " + operation + " on " + filePath);
 
-            // Only analyze modifications and creations
-            if (!operation.equals("MODIFY") && !operation.equals("CLOSE_WRITE")
-                    && !operation.equals("CREATE")) {
+            // Only analyze modifications
+            if (!operation.equals("MODIFY")) {
                 Log.d(TAG, "Skipping operation: " + operation);
                 return;
             }
@@ -94,12 +93,14 @@ public class UnifiedDetectionEngine {
             Log.i(TAG, "Detection: entropy=" + entropy + ", kl=" + klDivergence + ", sprt=" + sprtState + ", score="
                     + confidenceScore);
 
-            // Create detection result
             DetectionResult result = new DetectionResult(
                     entropy, klDivergence, sprtState.name(), confidenceScore, filePath);
 
-            // Log result
             logDetectionResult(result);
+
+            if (result.isHighRisk()) {
+                Log.w(TAG, "HIGH RISK DETECTED: " + result.toJSON().toString());
+            }
 
             // Reset SPRT if decision reached
             if (sprtState != SPRTDetector.SPRTState.CONTINUE) {

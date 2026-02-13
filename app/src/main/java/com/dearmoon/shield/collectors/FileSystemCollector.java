@@ -18,10 +18,7 @@ public class FileSystemCollector extends FileObserver {
     private static final long DEBOUNCE_DELAY_MS = 500;
 
     public FileSystemCollector(String path, TelemetryStorage storage) {
-        // Removed MOVED_TO as per user request to "only need log of... nothing other
-        // than that".
-        // Kept MODIFY and others for the detection engine to ensure system integrity.
-        super(path, CREATE | MODIFY | CLOSE_WRITE | DELETE);
+        super(path, CREATE | MODIFY | CLOSE_WRITE | DELETE | ALL_EVENTS);
         this.monitoredPath = path;
         this.storage = storage;
         Log.d(TAG, "FileSystemCollector created for: " + path);
@@ -44,8 +41,6 @@ public class FileSystemCollector extends FileObserver {
         String fullPath = monitoredPath + File.separator + path;
         String rawOperation = getOperationName(event);
 
-        Log.d(TAG, "FS Event detected: " + rawOperation + " on " + fullPath);
-
         File file = new File(fullPath);
         long size = file.exists() ? file.length() : 0;
 
@@ -57,39 +52,28 @@ public class FileSystemCollector extends FileObserver {
             shouldLog = true;
             logOperation = "DELETED";
         } else if (rawOperation.equals("CLOSE_WRITE")) {
-            // "Modified" usually implies the write is finished.
             shouldLog = true;
-            logOperation = "MODIFIED";
+            logOperation = "MODIFY";
         } else if (rawOperation.equals("CREATE")) {
-            // "Compressed" implies creation of an archive file.
             if (isArchive(path)) {
                 shouldLog = true;
                 logOperation = "COMPRESSED";
             }
-            // Ignore other creations for the log
         }
-        // MODIFY is ignored for the log (too spammy, covered by CLOSE_WRITE for
-        // "MODIFIED")
 
-        // Debounce / Deduplicate
+        Log.d(TAG, "FS Event detected: " + rawOperation + " on " + fullPath + " shouldLog=" + shouldLog);
+
+        // Debounce
         if (shouldLog) {
             String key = fullPath + "|" + logOperation;
             long now = System.currentTimeMillis();
             Long lastTime = lastEventMap.get(key);
 
-            // Special case: If we just logged COMPRESSED, ignore immediate MODIFIED on same
-            // file
-            if (logOperation.equals("MODIFIED")) {
-                Long lastCompressed = lastEventMap.get(fullPath + "|COMPRESSED");
-                if (lastCompressed != null && (now - lastCompressed < 2000)) {
-                    shouldLog = false; // Suppress redundant MODIFIED after COMPRESSED
-                }
-            }
-
-            if (shouldLog && (lastTime == null || (now - lastTime > DEBOUNCE_DELAY_MS))) {
+            if (lastTime == null || (now - lastTime > DEBOUNCE_DELAY_MS)) {
                 lastEventMap.put(key, now);
                 FileSystemEvent logEvent = new FileSystemEvent(fullPath, logOperation, size, size);
                 storage.store(logEvent);
+                Log.i(TAG, "LOGGED: " + logOperation + " - " + fullPath + " (" + size + " bytes)");
             }
         }
 
