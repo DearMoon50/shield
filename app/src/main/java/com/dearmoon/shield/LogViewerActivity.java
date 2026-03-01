@@ -1,5 +1,6 @@
 package com.dearmoon.shield;
 
+import android.os.Build;
 import android.os.Bundle;
 import android.util.Log;
 import android.view.View;
@@ -41,6 +42,14 @@ public class LogViewerActivity extends AppCompatActivity {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_log_viewer);
 
+        // Force status bar to black
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+            getWindow().setStatusBarColor(0xFF000000);
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            getWindow().getDecorView().setSystemUiVisibility(0);
+        }
+
         com.google.android.material.appbar.MaterialToolbar toolbar = findViewById(R.id.toolbarLogs);
         setSupportActionBar(toolbar);
         if (getSupportActionBar() != null) {
@@ -81,18 +90,17 @@ public class LogViewerActivity extends AppCompatActivity {
             public void onNothingSelected(AdapterView<?> parent) {
             }
         });
+
+        findViewById(R.id.btnClearAllLogs).setOnClickListener(v -> clearAllLogs());
     }
 
     private void loadAllLogs() {
         allEvents.clear();
 
-        // Load telemetry events
         loadTelemetryEvents();
-
-        // Load detection results
         loadDetectionResults();
+        mergeFileEventsWithDetections();
 
-        // Sort by timestamp (newest first)
         Collections.sort(allEvents, (a, b) -> Long.compare(b.timestamp, a.timestamp));
 
         Log.i(TAG, "Loaded " + allEvents.size() + " total events");
@@ -145,15 +153,18 @@ public class LogViewerActivity extends AppCompatActivity {
         switch (eventType) {
             case "FILE_SYSTEM":
                 String operation = json.optString("operation", "UNKNOWN");
+                String filePath = json.optString("filePath", "Unknown");
+                String fileName = new File(filePath).getName();
+                String extension = json.optString("fileExtension", "N/A");
+                long size = json.optLong("fileSizeAfter", 0);
 
-                entry.title = "File System Event";
+                entry.title = fileName;
                 entry.details = String.format(
-                        "Operation: %s\nFile: %s\nExtension: %s\nSize Before: %d bytes\nSize After: %d bytes",
+                        "Operation: %s\nFull Path: %s\nExtension: %s\nSize: %d bytes",
                         operation,
-                        json.optString("filePath", "Unknown"),
-                        json.optString("fileExtension", "N/A"),
-                        json.optLong("fileSizeBefore", 0),
-                        json.optLong("fileSizeAfter", 0));
+                        filePath,
+                        extension,
+                        size);
                 entry.severity = getSeverityForOperation(operation);
                 break;
 
@@ -241,11 +252,13 @@ public class LogViewerActivity extends AppCompatActivity {
 
         int confidenceScore = json.getInt("confidence_score");
         String sprtState = json.getString("sprt_state");
+        String filePath = json.optString("file_path", "Unknown");
+        String fileName = new File(filePath).getName();
 
-        entry.title = "🔍 Detection Result";
+        entry.title = "Detection: " + fileName;
         entry.details = String.format(
-                "File: %s\n\nEntropy: %s\nKL-Divergence: %s\nSPRT State: %s\nConfidence Score: %d/100\n\nRisk Level: %s",
-                json.optString("file_path", "Unknown"),
+                "Full Path: %s\n\nEntropy: %s\nKL-Divergence: %s\nSPRT State: %s\nConfidence Score: %d/100\n\nRisk Level: %s",
+                filePath,
                 json.optString("entropy", "N/A"),
                 json.optString("kl_divergence", "N/A"),
                 sprtState,
@@ -265,39 +278,56 @@ public class LogViewerActivity extends AppCompatActivity {
 
     private String getSeverityForOperation(String operation) {
         switch (operation) {
-            case "DELETE":
+            case "DELETED":
                 return "HIGH";
             case "MODIFY":
-            case "CLOSE_WRITE":
                 return "MEDIUM";
-            case "CREATE":
-            case "MOVED_TO":
-                return "INFO";
+            case "COMPRESSED":
+                return "MEDIUM";
             default:
                 return "INFO";
         }
+    }
+
+    private void mergeFileEventsWithDetections() {
+        // Don't merge - keep them separate
+        // File events stay clean, detection events stay separate
+    }
+
+    private String extractFilePath(String details) {
+        if (details == null)
+            return null;
+        String[] lines = details.split("\\n");
+        for (String line : lines) {
+            if (line.startsWith("Full Path:") || line.startsWith("File:")) {
+                return line.substring(line.indexOf(":") + 1).trim();
+            }
+        }
+        return null;
+    }
+
+    private String extractDetectionInfo(String details) {
+        if (details == null)
+            return "";
+        StringBuilder info = new StringBuilder();
+        String[] lines = details.split("\\n");
+        for (String line : lines) {
+            if (line.startsWith("Entropy:") || line.startsWith("KL-Divergence:") ||
+                    line.startsWith("SPRT State:") || line.startsWith("Confidence Score:") ||
+                    line.startsWith("Risk Level:")) {
+                info.append(line).append("\n");
+            }
+        }
+        return info.toString().trim();
     }
 
     private void applyFilter() {
         filteredEvents.clear();
 
         for (LogEntry entry : allEvents) {
-            // Apply filtering logic
             if (currentFilter.equals("ALL")) {
-                // In the 'ALL' view, we only show critical file system events
-                // (MOD/DEL/CLOSE_WRITE)
-                // and everything else (Detection, Network, Honeyfile)
-                if (entry.type.equals("FILE_SYSTEM")) {
-                    if (entry.details.contains("Operation: MODIFY") ||
-                            entry.details.contains("Operation: DELETE") ||
-                            entry.details.contains("Operation: CLOSE_WRITE")) {
-                        filteredEvents.add(entry);
-                    }
-                } else {
-                    filteredEvents.add(entry);
-                }
+                filteredEvents.add(entry);
             } else if (entry.type.equals(currentFilter)) {
-                // If a specific filter is selected, show EVERYTHING of that type
                 filteredEvents.add(entry);
             }
         }
@@ -312,6 +342,16 @@ public class LogViewerActivity extends AppCompatActivity {
         tvEventCount.setText(countText);
     }
 
+    private void clearAllLogs() {
+        new File(getFilesDir(), "modeb_telemetry.json").delete();
+        new File(getFilesDir(), "detection_results.json").delete();
+        allEvents.clear();
+        filteredEvents.clear();
+        logAdapter.notifyDataSetChanged();
+        updateEventCount();
+        Toast.makeText(this, "All logs cleared", Toast.LENGTH_SHORT).show();
+    }
+
     // Inner class for log entries
     public static class LogEntry {
         public long timestamp;
@@ -321,7 +361,7 @@ public class LogViewerActivity extends AppCompatActivity {
         public String severity; // INFO, LOW, MEDIUM, HIGH, CRITICAL
 
         public String getFormattedTime() {
-            SimpleDateFormat sdf = new SimpleDateFormat("MMM dd, HH:mm:ss", Locale.US);
+            SimpleDateFormat sdf = new SimpleDateFormat("MMM dd, yy HH:mm", Locale.US);
             return sdf.format(new Date(timestamp));
         }
 

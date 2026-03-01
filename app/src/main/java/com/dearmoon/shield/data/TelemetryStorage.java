@@ -22,7 +22,7 @@ public class TelemetryStorage {
             writer.write(jsonStr);
             writer.write("\n");
             writer.flush();
-            Log.d(TAG, "Event stored: " + event.getEventType());
+            Log.i(TAG, "Event stored: " + event.getEventType() + " to " + logFile.getAbsolutePath());
         } catch (Exception e) {
             Log.e(TAG, "Failed to store event", e);
         }

@@ -52,7 +52,11 @@ public class UnifiedDetectionEngine {
             String operation = event.toJSON().optString("operation", "");
             String filePath = event.toJSON().optString("filePath", "");
 
+            Log.d(TAG, "Analyzing file event: " + operation + " on " + filePath);
+
+            // Only analyze modifications
             if (!operation.equals("MODIFY") && !operation.equals("CLOSE_WRITE") && !operation.equals("CREATE")) {
+                Log.d(TAG, "Skipping operation: " + operation);
                 return;
             }
 
@@ -78,10 +82,15 @@ public class UnifiedDetectionEngine {
 
             logToDatabase(filePath, operation, entropy, klDivergence, sprtState, confidenceScore, latency);
 
-            if (confidenceScore >= 70) {
+            DetectionResult result = new DetectionResult(
+                    entropy, klDivergence, sprtState.name(), confidenceScore, filePath);
+
+            if (result.isHighRisk()) {
+                Log.w(TAG, "HIGH RISK DETECTED: " + result.toJSON().toString());
                 alertManager.showHighRiskAlert(filePath, confidenceScore);
             }
 
+            // Reset SPRT if decision reached
             if (sprtState != SPRTDetector.SPRTState.CONTINUE) {
                 sprtDetector.reset();
             }

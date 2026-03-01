@@ -15,6 +15,7 @@ import com.dearmoon.shield.MainActivity;
 import com.dearmoon.shield.R;
 import com.dearmoon.shield.alert.AlertManager;
 import com.dearmoon.shield.collectors.FifoHoneyfileManager;
+import com.dearmoon.shield.collectors.MediaStoreCollector;
 import com.dearmoon.shield.collectors.FileSystemCollector;
 import com.dearmoon.shield.collectors.HoneyfileCollector;
 import com.dearmoon.shield.data.TelemetryStorage;
@@ -32,6 +33,7 @@ public class ShieldProtectionService extends Service {
     private UnifiedDetectionEngine detectionEngine;
     private HoneyfileCollector honeyfileCollector;
     private FifoHoneyfileManager fifoHoneyfileManager;
+    private MediaStoreCollector mediaStoreCollector;
     private List<FileSystemCollector> fileSystemCollectors = new ArrayList<>();
     private AlertManager alertManager;
 
@@ -44,6 +46,9 @@ public class ShieldProtectionService extends Service {
         alertManager = new AlertManager(this);
         detectionEngine = new UnifiedDetectionEngine(this, alertManager);
 
+        // Initialize collectors
+        mediaStoreCollector = new MediaStoreCollector(this, storage, detectionEngine);
+        mediaStoreCollector.startWatching();
         initializeCollectors();
         startForeground(NOTIFICATION_ID, createNotification());
     }
@@ -74,21 +79,10 @@ public class ShieldProtectionService extends Service {
 
         File externalStorage = Environment.getExternalStorageDirectory();
         if (externalStorage != null && externalStorage.exists()) {
-            dirs.add(externalStorage.getAbsolutePath());
-
             addIfExists(dirs, new File(externalStorage, "Documents"));
             addIfExists(dirs, new File(externalStorage, "Download"));
             addIfExists(dirs, new File(externalStorage, "Pictures"));
             addIfExists(dirs, new File(externalStorage, "DCIM"));
-        }
-
-        File[] externalFilesDirs = getExternalFilesDirs(null);
-        if (externalFilesDirs != null) {
-            for (File dir : externalFilesDirs) {
-                if (dir != null && dir.exists()) {
-                    dirs.add(dir.getAbsolutePath());
-                }
-            }
         }
 
         return dirs.toArray(new String[0]);
@@ -142,6 +136,12 @@ public class ShieldProtectionService extends Service {
     public void onDestroy() {
         Log.i(TAG, "ShieldProtectionService destroyed");
 
+        // Stop MediaStore collector
+        if (mediaStoreCollector != null) {
+            mediaStoreCollector.stopWatching();
+        }
+
+        // Stop all file system collectors
         for (FileSystemCollector collector : fileSystemCollectors) {
             collector.stopWatching();
         }
