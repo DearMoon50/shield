@@ -167,6 +167,36 @@
                 app:icon="@android:drawable/ic_menu_agenda" />
 
             <com.google.android.material.button.MaterialButton
+                android:id="@+id/btnDashboard"
+                style="@style/Widget.Material3.Button.TonalButton"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:paddingVertical="16dp"
+                android:text="Open Dashboard"
+                app:icon="@android:drawable/ic_menu_view" />
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btnSettings"
+                style="@style/Widget.Material3.Button.TonalButton"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:paddingVertical="16dp"
+                android:text="Settings"
+                app:icon="@android:drawable/ic_menu_preferences" />
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btnBackup"
+                style="@style/Widget.Material3.Button.TonalButton"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:paddingVertical="16dp"
+                android:text="Shadow Backups"
+                app:icon="@android:drawable/ic_menu_save" />
+
+            <com.google.android.material.button.MaterialButton
                 android:id="@+id/btnRequestPermissions"
                 style="@style/Widget.Material3.Button.TextButton"
                 android:layout_width="match_parent"

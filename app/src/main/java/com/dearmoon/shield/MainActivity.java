@@ -18,7 +18,10 @@ import androidx.core.app.ActivityCompat;
 import androidx.core.content.ContextCompat;
 import com.dearmoon.shield.services.NetworkGuardService;
 import com.dearmoon.shield.services.ShieldProtectionService;
+import com.dearmoon.shield.ui.DashboardActivity;
+import dagger.hilt.android.AndroidEntryPoint;
 
+@AndroidEntryPoint
 public class MainActivity extends AppCompatActivity {
     private static final String TAG = "MainActivity";
     private static final int PERMISSION_REQUEST_CODE = 100;
@@ -44,6 +47,9 @@ public class MainActivity extends AppCompatActivity {
         findViewById(R.id.btnStopVpn).setOnClickListener(v -> stopVpnService());
         findViewById(R.id.btnRequestPermissions).setOnClickListener(v -> requestNecessaryPermissions());
         findViewById(R.id.btnViewLogs).setOnClickListener(v -> viewLogs());
+        findViewById(R.id.btnDashboard).setOnClickListener(v -> openDashboard());
+        findViewById(R.id.btnSettings).setOnClickListener(v -> openSettings());
+        findViewById(R.id.btnBackup).setOnClickListener(v -> openBackup());
 
         updateStatusDisplay();
     }
@@ -100,6 +106,21 @@ public class MainActivity extends AppCompatActivity {
 
     private void viewLogs() {
         Intent intent = new Intent(this, LogViewerActivity.class);
+        startActivity(intent);
+    }
+
+    private void openDashboard() {
+        Intent intent = new Intent(this, DashboardActivity.class);
+        startActivity(intent);
+    }
+
+    private void openSettings() {
+        Intent intent = new Intent(this, com.dearmoon.shield.ui.SettingsActivity.class);
+        startActivity(intent);
+    }
+
+    private void openBackup() {
+        Intent intent = new Intent(this, com.dearmoon.shield.ui.BackupActivity.class);
         startActivity(intent);
     }
 

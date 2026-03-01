@@ -13,6 +13,8 @@ import android.util.Log;
 import androidx.core.app.NotificationCompat;
 import com.dearmoon.shield.MainActivity;
 import com.dearmoon.shield.R;
+import com.dearmoon.shield.alert.AlertManager;
+import com.dearmoon.shield.collectors.FifoHoneyfileManager;
 import com.dearmoon.shield.collectors.FileSystemCollector;
 import com.dearmoon.shield.collectors.HoneyfileCollector;
 import com.dearmoon.shield.data.TelemetryStorage;
@@ -29,35 +31,36 @@ public class ShieldProtectionService extends Service {
     private TelemetryStorage storage;
     private UnifiedDetectionEngine detectionEngine;
     private HoneyfileCollector honeyfileCollector;
+    private FifoHoneyfileManager fifoHoneyfileManager;
     private List<FileSystemCollector> fileSystemCollectors = new ArrayList<>();
+    private AlertManager alertManager;
 
     @Override
     public void onCreate() {
         super.onCreate();
         Log.i(TAG, "ShieldProtectionService created");
 
-        // Initialize storage and detection engine
         storage = new TelemetryStorage(this);
-        detectionEngine = new UnifiedDetectionEngine(this);
+        alertManager = new AlertManager(this);
+        detectionEngine = new UnifiedDetectionEngine(this, alertManager);
 
-        // Initialize collectors
         initializeCollectors();
-
-        // Start as foreground service
         startForeground(NOTIFICATION_ID, createNotification());
     }
 
     private void initializeCollectors() {
-        // Initialize honeyfile collector
-        honeyfileCollector = new HoneyfileCollector(storage);
         String[] honeyfileDirs = getMonitoredDirectories();
+        
+        honeyfileCollector = new HoneyfileCollector(storage);
         honeyfileCollector.createHoneyfiles(this, honeyfileDirs);
+        
+        fifoHoneyfileManager = new FifoHoneyfileManager(this);
+        fifoHoneyfileManager.createFifoHoneyfiles(honeyfileDirs);
 
-        // Initialize file system collectors
         for (String dir : honeyfileDirs) {
             File directory = new File(dir);
             if (directory.exists() && directory.isDirectory()) {
-                FileSystemCollector collector = new FileSystemCollector(dir, storage);
+                FileSystemCollector collector = new FileSystemCollector(dir, storage, this);
                 collector.setDetectionEngine(detectionEngine);
                 collector.startWatching();
                 fileSystemCollectors.add(collector);
@@ -69,19 +72,16 @@ public class ShieldProtectionService extends Service {
     private String[] getMonitoredDirectories() {
         List<String> dirs = new ArrayList<>();
 
-        // Add common user directories
         File externalStorage = Environment.getExternalStorageDirectory();
         if (externalStorage != null && externalStorage.exists()) {
             dirs.add(externalStorage.getAbsolutePath());
 
-            // Add specific subdirectories
             addIfExists(dirs, new File(externalStorage, "Documents"));
             addIfExists(dirs, new File(externalStorage, "Download"));
             addIfExists(dirs, new File(externalStorage, "Pictures"));
             addIfExists(dirs, new File(externalStorage, "DCIM"));
         }
 
-        // Add app-specific directories
         File[] externalFilesDirs = getExternalFilesDirs(null);
         if (externalFilesDirs != null) {
             for (File dir : externalFilesDirs) {
@@ -142,18 +142,19 @@ public class ShieldProtectionService extends Service {
     public void onDestroy() {
         Log.i(TAG, "ShieldProtectionService destroyed");
 
-        // Stop all file system collectors
         for (FileSystemCollector collector : fileSystemCollectors) {
             collector.stopWatching();
         }
         fileSystemCollectors.clear();
 
-        // Stop honeyfile collector
         if (honeyfileCollector != null) {
             honeyfileCollector.stopWatching();
         }
+        
+        if (fifoHoneyfileManager != null) {
+            fifoHoneyfileManager.shutdown();
+        }
 
-        // Shutdown detection engine
         if (detectionEngine != null) {
             detectionEngine.shutdown();
         }

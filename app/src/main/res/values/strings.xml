@@ -1,3 +1,4 @@
 <resources>
     <string name="app_name">SHIELD</string>
+    <string name="accessibility_service_description">Monitors for ransomware lock screen and overlay abuse</string>
 </resources>

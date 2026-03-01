@@ -4,19 +4,22 @@ import android.content.Context;
 import android.os.Handler;
 import android.os.HandlerThread;
 import android.util.Log;
+import com.dearmoon.shield.alert.AlertManager;
 import com.dearmoon.shield.data.FileSystemEvent;
+import com.dearmoon.shield.database.ShieldDatabase;
+import com.dearmoon.shield.database.SystemEvent;
 import java.io.File;
-import java.io.FileWriter;
 import java.util.concurrent.ConcurrentLinkedQueue;
 
 public class UnifiedDetectionEngine {
     private static final String TAG = "UnifiedDetectionEngine";
-    private static final String DETECTION_LOG = "detection_results.json";
 
     private final Context context;
     private final EntropyAnalyzer entropyAnalyzer;
     private final KLDivergenceCalculator klCalculator;
     private final SPRTDetector sprtDetector;
+    private final ShieldDatabase database;
+    private final AlertManager alertManager;
 
     private final HandlerThread detectionThread;
     private final Handler detectionHandler;
@@ -24,13 +27,15 @@ public class UnifiedDetectionEngine {
     private final ConcurrentLinkedQueue<String> recentModifications = new ConcurrentLinkedQueue<>();
     private long lastModificationTime = 0;
     private int modificationsInWindow = 0;
-    private static final long TIME_WINDOW_MS = 1000; // 1 second window
+    private static final long TIME_WINDOW_MS = 1000;
 
-    public UnifiedDetectionEngine(Context context) {
+    public UnifiedDetectionEngine(Context context, AlertManager alertManager) {
         this.context = context;
+        this.alertManager = alertManager;
         this.entropyAnalyzer = new EntropyAnalyzer();
         this.klCalculator = new KLDivergenceCalculator();
         this.sprtDetector = new SPRTDetector();
+        this.database = ShieldDatabase.getInstance(context);
 
         detectionThread = new HandlerThread("DetectionThread");
         detectionThread.start();
@@ -42,82 +47,64 @@ public class UnifiedDetectionEngine {
     }
 
     private void analyzeFileEvent(FileSystemEvent event) {
+        long startTime = System.currentTimeMillis();
         try {
             String operation = event.toJSON().optString("operation", "");
             String filePath = event.toJSON().optString("filePath", "");
 
-            Log.d(TAG, "Analyzing file event: " + operation + " on " + filePath);
-
-            // Only analyze modifications and creations
-            if (!operation.equals("MODIFY") && !operation.equals("CLOSE_WRITE")
-                    && !operation.equals("CREATE")) {
-                Log.d(TAG, "Skipping operation: " + operation);
+            if (!operation.equals("MODIFY") && !operation.equals("CLOSE_WRITE") && !operation.equals("CREATE")) {
                 return;
             }
 
             File file = new File(filePath);
+            if (!file.exists() || file.length() < 100) return;
 
-            // Skip if file doesn't exist or is too small
-            if (!file.exists()) {
-                Log.d(TAG, "File doesn't exist: " + filePath);
-                return;
-            }
-
-            if (file.length() < 100) {
-                Log.d(TAG, "File too small (" + file.length() + " bytes): " + filePath);
-                return;
-            }
-
-            // Update modification rate for SPRT
             updateModificationRate();
 
-            // Calculate entropy and KL-divergence
-            Log.d(TAG, "Calculating entropy for: " + filePath);
             double entropy = entropyAnalyzer.calculateEntropy(file);
+            logIntermediateStep(filePath, "ENTROPY_CALCULATED", entropy, 0, "");
+            
             double klDivergence = klCalculator.calculateDivergence(file);
+            logIntermediateStep(filePath, "KL_CALCULATED", entropy, klDivergence, "");
+            
+            if (entropy == 0.0) return;
 
-            Log.d(TAG, "Entropy: " + entropy + ", KL: " + klDivergence);
-
-            // Skip if entropy calculation failed
-            if (entropy == 0.0) {
-                Log.w(TAG, "Entropy calculation failed for: " + filePath);
-                return;
-            }
-
-            // Get SPRT state
             double modRate = (double) modificationsInWindow / (TIME_WINDOW_MS / 1000.0);
             SPRTDetector.SPRTState sprtState = sprtDetector.addObservation(modRate);
-
-            // Calculate composite confidence score
+            logIntermediateStep(filePath, "SPRT_UPDATED", entropy, klDivergence, sprtState.name());
+            
             int confidenceScore = calculateConfidenceScore(entropy, klDivergence, sprtState);
+            long latency = System.currentTimeMillis() - startTime;
 
-            Log.i(TAG, "Detection: entropy=" + entropy + ", kl=" + klDivergence + ", sprt=" + sprtState + ", score="
-                    + confidenceScore);
+            logToDatabase(filePath, operation, entropy, klDivergence, sprtState, confidenceScore, latency);
 
-            // Create detection result
-            DetectionResult result = new DetectionResult(
-                    entropy, klDivergence, sprtState.name(), confidenceScore, filePath);
+            if (confidenceScore >= 70) {
+                alertManager.showHighRiskAlert(filePath, confidenceScore);
+            }
 
-            // Log result
-            logDetectionResult(result);
-
-            // Reset SPRT if decision reached
             if (sprtState != SPRTDetector.SPRTState.CONTINUE) {
-                Log.w(TAG, "SPRT Decision: " + sprtState + " | Confidence: " + confidenceScore);
                 sprtDetector.reset();
             }
         } catch (Exception e) {
             Log.e(TAG, "Error analyzing file event", e);
         }
     }
+    
+    private void logIntermediateStep(String filePath, String step, double entropy, double kl, String sprt) {
+        SystemEvent event = new SystemEvent(System.currentTimeMillis(), "PIPELINE_STEP", "DetectionEngine");
+        event.filePath = filePath;
+        event.operation = step;
+        event.entropy = entropy;
+        event.klDivergence = kl;
+        event.sprtState = sprt;
+        event.severity = "LOW";
+        detectionHandler.post(() -> database.systemEventDao().insert(event));
+    }
 
     private void updateModificationRate() {
         long currentTime = System.currentTimeMillis();
-
-        // Add current modification
         recentModifications.add(String.valueOf(currentTime));
 
-        // Remove modifications outside time window
         while (!recentModifications.isEmpty()) {
             long oldTime = Long.parseLong(recentModifications.peek());
             if (currentTime - oldTime > TIME_WINDOW_MS) {
@@ -135,7 +122,6 @@ public class UnifiedDetectionEngine {
             SPRTDetector.SPRTState sprtState) {
         int score = 0;
 
-        // Entropy contribution (0-40 points)
         if (entropy > 7.8)
             score += 40;
         else if (entropy > 7.5)
@@ -145,15 +131,13 @@ public class UnifiedDetectionEngine {
         else if (entropy > 6.0)
             score += 10;
 
-        // KL-divergence contribution (0-30 points)
         if (klDivergence < 0.05)
-            score += 30; // Very uniform (encrypted)
+            score += 30;
         else if (klDivergence < 0.1)
             score += 20;
         else if (klDivergence < 0.2)
             score += 10;
 
-        // SPRT contribution (0-30 points)
         if (sprtState == SPRTDetector.SPRTState.ACCEPT_H1)
             score += 30;
         else if (sprtState == SPRTDetector.SPRTState.CONTINUE)
@@ -162,26 +146,23 @@ public class UnifiedDetectionEngine {
         return Math.min(score, 100);
     }
 
-    private void logDetectionResult(DetectionResult result) {
-        try {
-            File logFile = new File(context.getFilesDir(), DETECTION_LOG);
-            FileWriter writer = new FileWriter(logFile, true);
-            String jsonStr = result.toJSON().toString();
-            writer.write(jsonStr + "\n");
-            writer.close();
-
-            Log.i(TAG, "Detection logged: " + jsonStr);
-
-            if (result.isHighRisk()) {
-                Log.w(TAG, "HIGH RISK DETECTED: " + result.toJSON().toString());
-            }
-        } catch (Exception e) {
-            Log.e(TAG, "Failed to log detection result", e);
-        }
-    }
-
-    public File getDetectionLogFile() {
-        return new File(context.getFilesDir(), DETECTION_LOG);
+    private void logToDatabase(String filePath, String operation, double entropy, 
+                               double klDivergence, SPRTDetector.SPRTState sprtState, 
+                               int confidenceScore, long latency) {
+        SystemEvent event = new SystemEvent(System.currentTimeMillis(), "DETECTION", "UnifiedDetectionEngine");
+        event.filePath = filePath;
+        event.operation = operation;
+        event.entropy = entropy;
+        event.klDivergence = klDivergence;
+        event.sprtState = sprtState.name();
+        event.confidenceScore = confidenceScore;
+        event.severity = confidenceScore >= 70 ? "CRITICAL" : confidenceScore >= 50 ? "HIGH" : "MEDIUM";
+        event.rawData = "latency_ms:" + latency;
+        
+        detectionHandler.post(() -> database.systemEventDao().insert(event));
+        
+        Log.i(TAG, String.format("Detection: entropy=%.2f kl=%.3f sprt=%s score=%d latency=%dms",
+            entropy, klDivergence, sprtState, confidenceScore, latency));
     }
 
     public void shutdown() {

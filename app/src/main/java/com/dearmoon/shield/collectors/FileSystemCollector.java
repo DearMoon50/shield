@@ -1,8 +1,10 @@
 package com.dearmoon.shield.collectors;
 
+import android.content.Context;
 import android.os.FileObserver;
 import android.util.Log;
 import androidx.annotation.Nullable;
+import com.dearmoon.shield.backup.ShadowBackupManager;
 import com.dearmoon.shield.data.FileSystemEvent;
 import com.dearmoon.shield.data.TelemetryStorage;
 import com.dearmoon.shield.detection.UnifiedDetectionEngine;
@@ -13,11 +15,13 @@ public class FileSystemCollector extends FileObserver {
     private final TelemetryStorage storage;
     private final String monitoredPath;
     private UnifiedDetectionEngine detectionEngine;
+    private ShadowBackupManager backupManager;
 
-    public FileSystemCollector(String path, TelemetryStorage storage) {
+    public FileSystemCollector(String path, TelemetryStorage storage, Context context) {
         super(path, CREATE | MODIFY | CLOSE_WRITE | MOVED_TO | DELETE);
         this.monitoredPath = path;
         this.storage = storage;
+        this.backupManager = new ShadowBackupManager(context);
         Log.d(TAG, "FileSystemCollector created for: " + path);
     }
 
@@ -32,17 +36,17 @@ public class FileSystemCollector extends FileObserver {
         String fullPath = monitoredPath + File.separator + path;
         String operation = getOperationName(event);
         
-        Log.d(TAG, "FS Event detected: " + operation + " on " + fullPath);
-        
         File file = new File(fullPath);
+        
+        if (file.exists() && operation.equals("MODIFY") && file.length() > 1024) {
+            backupManager.createSnapshot(file);
+        }
+        
         long size = file.exists() ? file.length() : 0;
-
         FileSystemEvent fsEvent = new FileSystemEvent(fullPath, operation, size, size);
         storage.store(fsEvent);
         
-        // Forward to detection engine for modifications
         if (detectionEngine != null && (operation.equals("MODIFY") || operation.equals("CLOSE_WRITE") || operation.equals("CREATE"))) {
-            Log.d(TAG, "Forwarding to detection engine: " + fullPath);
             detectionEngine.processFileEvent(fsEvent);
         }
     }
